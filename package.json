@@ -1,0 +1,27 @@
+{
+    "name": "supabase-client-ts",
+    "version": "0.1.0",
+    "description": "Cliente básico en TypeScript para conectar a Supabase",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "typecheck": "tsc --noEmit",
+        "dev": "nodemon src/mainService.ts",
+        "prestart": "npm run build",
+        "start": "node dist/mainService.js"
+    },
+    "author": "artozari",
+    "license": "MIT",
+    "dependencies": {
+        "@supabase/supabase-js": "^2.88.0",
+        "dotenv": "^16.0.0",
+        "mqtt": "^4.3.8",
+        "node-cron": "^4.2.1",
+        "nodemon": "^3.1.11"
+    },
+    "devDependencies": {
+        "@types/node": "^18.0.0",
+        "ts-node": "^10.0.0",
+        "typescript": "^5.0.0"
+    }
+}

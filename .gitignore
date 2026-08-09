@@ -1,0 +1,58 @@
+# Dependencias
+/node_modules/
+
+# Salida de compilación
+/dist/
+*.tsbuildinfo
+
+# Archivos de entorno (nunca commitear secretos)
+.env
+.env.*.local
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage
+/coverage/
+/.nyc_output
+
+# Carpeta de cache de supabase local (ajusta si necesitas commitear algo dentro de supabase/)
+.supabase/
+supabase/.cache/
+supabase/.local/
+
+# IDEs y editores
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos temporales / procesos
+*.pid
+*.seed
+*.pid.lock
+*.tmp
+
+# Test / herramientas
+/playwright-report/
+/test-results/
+
+# Otros artefactos
+.env.example  # opcionalmente puedes querer commitear .env.example; si NO, elimínalo de aquí
+*.tgz
+*.zip
