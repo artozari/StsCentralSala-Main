@@ -1,10 +1,10 @@
 import "dotenv/config";
 
 import { getSupabaseClient } from "../supabaseConnect/supabaseConnectClient";
-import { client, topicSrvGame } from "../mqttConnect/connectorMqtt";
+import type { CasinoClient } from "../mqttConnect/connectorMqtt";
 import { log } from "node:console";
-import { get } from "node:http";
 import { updateLastGameRegistered } from "./updateLastGameRegistered";
+import { resolveTableByCasinoAndNumber, type ResolvedTable } from "./resolveTable";
 import {
     isSyncRequestAllowed,
     markSyncRequested,
@@ -15,8 +15,17 @@ import {
 } from "./syncState";
 const supabase = getSupabaseClient();
 
-async function GameMessage(gameData: any, topic: string): Promise<void> {
+async function GameMessage(casino: CasinoClient, gameData: any, topic: string): Promise<void> {
     const createdAt = gameData.createdAt ? new Date(gameData.createdAt) : new Date();
+
+    // La mesa real se resuelve por casino + número de mesa (último segmento del tópico).
+    // gameData.tableId NO es confiable: cada máquina reporta su id local (siempre 1).
+    const resolved: ResolvedTable | null = await resolveTableByCasinoAndNumber(casino.casinoCode, topic);
+    if (!resolved) {
+        console.warn(`[AVISO] Mesa ${topic} no resuelta en el casino ${casino.casinoCode}. Se ignora el juego.`);
+        return;
+    }
+
     const getInGamesFromTable = {
         created_at: createdAt.getTime(),
         updated_at: gameData.updatedAt ? new Date(gameData.updatedAt).getTime() : createdAt.getTime(),
@@ -28,12 +37,10 @@ async function GameMessage(gameData: any, topic: string): Promise<void> {
         clockwise: gameData.clockwise,
         enabled: gameData.enabled || null,
         fk_croupier: gameData.croupierId,
-        // La mesa real se toma del tópico (último segmento de "SimuSts/STS-Casino/Cli/game/<idMesa>").
-        // gameData.tableId NO es confiable: cada máquina reporta su id local (siempre 1).
-        fk_table: topic || gameData.tableId,
+        fk_table: resolved.id,
     };
 
-    const { data: lastResgistredGameFromSalaOnTableTable, error: errorLastGameResgistre } = await supabase.from("table_table").select("*").eq("id", getInGamesFromTable.fk_table).order("id", { ascending: false }).maybeSingle();
+    const { data: lastResgistredGameFromSalaOnTableTable, error: errorLastGameResgistre } = await supabase.from("table_table").select("*").eq("id", resolved.id).maybeSingle();
 
     if (errorLastGameResgistre) {
         console.error("Error al obtener last_game_registered de table_table:", errorLastGameResgistre);
@@ -41,16 +48,15 @@ async function GameMessage(gameData: any, topic: string): Promise<void> {
     }
 
     if (!lastResgistredGameFromSalaOnTableTable) {
-        console.warn(`[AVISO] Mesa ${getInGamesFromTable.fk_table} no existe en table_table. Se ignora el juego. Registrá/configurá la mesa antes de recibir sus jugadas.`);
+        console.warn(`[AVISO] Mesa ${resolved.id} no existe en table_table. Se ignora el juego. Registrá/configurá la mesa antes de recibir sus jugadas.`);
         return;
     }
 
-    const fkTable = Number(getInGamesFromTable.fk_table);
+    const fkTable = resolved.id;
     const lastRegisteredGame = lastResgistredGameFromSalaOnTableTable?.last_game_registered ?? 0;
 
     // La diferencia se calcula contra last_game_registered (último juego registrado/contiguo de la mesa),
-    // no contra el máximo real en game_table. Así, una mesa configurada con last_game_registered = 4913
-    // espera que el próximo juego sea el 4914 y lo inserta directo, como si ya tuviera las jugadas previas.
+    // no contra el máximo real en game_table.
     const diff = getInGamesFromTable.game_number - lastRegisteredGame;
 
     if (diff >= 2) {
@@ -58,7 +64,7 @@ async function GameMessage(gameData: any, topic: string): Promise<void> {
         console.log(getInGamesFromTable.game_number, "juego entrante");
         console.log("hay juegos faltantes (diff >= 2). Solo se solicitan los juegos faltantes; el juego entrante se insertará cuando llegue en la respuesta GameSync.");
 
-        requestMissingGamesInSala(fkTable, lastRegisteredGame);
+        requestMissingGamesInSala(casino, fkTable, lastRegisteredGame);
         return;
     }
 
@@ -88,7 +94,6 @@ async function GameMessage(gameData: any, topic: string): Promise<void> {
 }
 
 async function insertGame(getGamesInTable: object): Promise<boolean> {
-    // const { data: insertedGame, error: errorInsertedGame } = await supabase.from("game_table").insert(getGamesInTable).select();
     const datas = { j: [getGamesInTable] };
     let { data: insertedGame, error: errorInsertedGame } = await supabase.rpc("insertar_juegos", {
         j: datas.j,
@@ -101,9 +106,9 @@ async function insertGame(getGamesInTable: object): Promise<boolean> {
         return true;
     }
 }
-function requestMissingGamesInSala(fk_table: number, lastRegisteredGame: number): void {
-    if (!client.connected) {
-        console.error("Cliente MQTT no está conectado. No se puede publicar solicitud de juegos faltantes.");
+function requestMissingGamesInSala(casino: CasinoClient, fk_table: number, lastRegisteredGame: number): void {
+    if (!casino.client.connected) {
+        console.error(`Cliente MQTT del casino ${casino.casinoCode} no está conectado. No se puede publicar solicitud de juegos faltantes.`);
         return;
     }
 
@@ -126,21 +131,13 @@ function requestMissingGamesInSala(fk_table: number, lastRegisteredGame: number)
     log("Último juego registrado en sala para esta mesa:", lastRegisteredGame);
 
     // (a) callback para detectar errores de publicación
-    client.publish(topicSrvGame + fk_table, JSON.stringify({ id: fk_table, last_game_registered: lastRegisteredGame }), { qos: 0 }, (err) => {
+    casino.client.publish(casino.topicSrvGame + fk_table, JSON.stringify({ id: fk_table, last_game_registered: lastRegisteredGame }), { qos: 0 }, (err) => {
         if (err) {
-            console.error(`Error al publicar solicitud de juegos faltantes en tópico ${topicSrvGame}${fk_table}:`, err);
+            console.error(`Error al publicar solicitud de juegos faltantes en tópico ${casino.topicSrvGame}${fk_table}:`, err);
         }
     });
 
     markSyncRequested(fk_table, now);
-}
-
-function requestUpdateTable(fk_table: number, gamenumber: number): void {
-    if (client.connected) {
-        client.publish(topicSrvGame + "/" + fk_table, JSON.stringify({ fk_table, gamenumber }), { qos: 0 });
-    } else {
-        console.error("Cliente MQTT no está conectado. No se puede publicar solicitud de actualización.");
-    }
 }
 
 export { GameMessage };

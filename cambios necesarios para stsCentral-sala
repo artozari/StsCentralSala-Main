@@ -1,0 +1,23 @@
+
+Implementación completa y verificada (typecheck + build OK). Resumen de lo que hice en /home/artozari/Documentos/Proyectos/stsCentralSala-main:
+Cambios de código
+Archivo	Cambio
+src/mqttConnect/connectorMqtt.ts	De 1 cliente a N. Lee MQTT_CASINOS (JSON), crea un mqtt.connect() por casino, exporta casinoClients[] y getCasinoClient().
+src/servicesServCli/resolveTable.ts	Nuevo: resuelve la mesa real por (casino_code → fk_casino, table_number) y por (casino_code, id).
+src/mainService.ts	Registra un handler por casino; pasa casino a GameMessage/GameSync/ConfigMessage. Heartbeat y config se publican en cada broker.
+src/servicesServCli/serv_game.ts	Resuelve fk_table real por casino+número; requestMissingGamesInSala publica en el broker del casino correcto.
+src/servicesServCli/game_sync.ts	Igual: inserta en el id real de la mesa del casino.
+src/servicesServCli/serv_config.ts	Resuelve la mesa por casino+número (fallback por id).
+src/utils.ts	publicarDatos(client, topic, dato) ahora recibe el client por casino.
+.env / .env.example	MQTT_BROKER_URL reemplazada por MQTT_CASINOS.
+Qué tenés que configurar
+1. En stsCentralSala-main/.env (ya lo dejé con un ejemplo):
+- MQTT_CASINOS: cada entrada debe tener casinoCode igual al casino_code de casino_table en Supabase, y su url. Hoy puse CA_STFE → :9104 y CA_MEL → :9105. Si el casino de Melincué se llama distinto en la DB, usá ese código. Revisá también username/password por casino (los dejé como Cartel/Mqtt123., ajustalos si difieren).
+2. En Supabase (la DB remota, la tocaás vos):
+- En casino_table debe existir el casino_code de cada casino (ej. agregar CA_MEL con su mqtt_url/mqtt_port).
+- En table_table, cada mesa debe tener el fk_casino correcto y su table_number. (Ej.: mesa 15 del casino A y mesa 15 del casino B son filas distintas con table_number=15 pero fk_casino distinto.)
+3. En el servidor sts-santafe.sielcon.net:
+- Exponer/levantar el broker del segundo casino en :9105 (hoy nginx solo mapea 9004→19004 y 9104→19104). Cada casino debe publicar a su propio broker/puerto.
+- El CASINO_URL_MQTT/CASINO_PORT_MQTT del publisher de cada casino debe apuntar a su broker (Santa Fe → :9104, Melincué → :9105), así cada casino llega a su broker y no se pisan los tópicos.
+4. Deploy: subir el dist/ (compilado) + el .env actualizado a /home/admin/sielcon/sts/apps/sts-CentralSala/dist/ y levantar node dist/mainService.js. Recordá que el .env del server también debe tener MQTT_CASINOS (hoy usa MQTT_BROKER_URL=ws://127.0.0.1:19104 que ya no se lee).
+5. Nota sobre la DB remota y RLS: no toqué nada, y el código sigue usando SUPABASE_ANON_KEY + la RPC insertar_juegos (con las políticas FOR ALL que ya aplicaste). La resolución de mesa ahora es por casino, así que dos "mesa 15" de casinos distintos caen en filas distintas de game_table.

@@ -1,7 +1,7 @@
-import { client } from "./mqttConnect/connectorMqtt";
+import type { MqttClient } from "mqtt";
 
-function publicarDatos(topic: string, datoAEnviar?: any): void {
-  if (!datoAEnviar && !client.connected) {
+function publicarDatos(client: MqttClient, topic: string, datoAEnviar?: any): void {
+  if (!client || !client.connected) {
     console.log("Cliente MQTT no conectado, no se envían datos");
     return;
   }
