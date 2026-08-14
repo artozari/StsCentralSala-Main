@@ -7,7 +7,7 @@
         "build": "tsc",
         "typecheck": "tsc --noEmit",
         "dev": "nodemon src/mainService.ts",
-        "prestart": "npm run build",
+        "prestart1": "npm run build",
         "start": "node dist/mainService.js"
     },
     "author": "artozari",

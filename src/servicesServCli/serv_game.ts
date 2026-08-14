@@ -64,7 +64,7 @@ async function GameMessage(casino: CasinoClient, gameData: any, topic: string): 
         console.log(getInGamesFromTable.game_number, "juego entrante");
         console.log("hay juegos faltantes (diff >= 2). Solo se solicitan los juegos faltantes; el juego entrante se insertará cuando llegue en la respuesta GameSync.");
 
-        requestMissingGamesInSala(casino, fkTable, lastRegisteredGame);
+        requestMissingGamesInSala(casino, resolved.table_number ?? fkTable, lastRegisteredGame);
         return;
     }
 
@@ -106,7 +106,7 @@ async function insertGame(getGamesInTable: object): Promise<boolean> {
         return true;
     }
 }
-function requestMissingGamesInSala(casino: CasinoClient, fk_table: number, lastRegisteredGame: number): void {
+function requestMissingGamesInSala(casino: CasinoClient, tableNumber: number, lastRegisteredGame: number): void {
     if (!casino.client.connected) {
         console.error(`Cliente MQTT del casino ${casino.casinoCode} no está conectado. No se puede publicar solicitud de juegos faltantes.`);
         return;
@@ -115,29 +115,29 @@ function requestMissingGamesInSala(casino: CasinoClient, fk_table: number, lastR
     const now = Date.now();
 
     // (d) alerta si la sincronización lleva demasiado tiempo sin resolverse
-    if (shouldAlertPendingSync(fk_table, now)) {
-        const info = getPendingSyncInfo(fk_table, now);
+    if (shouldAlertPendingSync(tableNumber, now)) {
+        const info = getPendingSyncInfo(tableNumber, now);
         const segundos = info ? Math.round(info.timePendingMs / 1000) : 0;
-        console.error(`[ALERTA] Mesa ${fk_table}: la sincronización de juegos faltantes lleva ${segundos}s sin resolverse (último juego contiguo: ${lastRegisteredGame}). Se reintenta la solicitud.`);
+        console.error(`[ALERTA] Mesa ${tableNumber}: la sincronización de juegos faltantes lleva ${segundos}s sin resolverse (último juego contiguo: ${lastRegisteredGame}). Se reintenta la solicitud.`);
     }
 
     // (b) cooldown: no saturar el broker re-pidiendo en cada juego mientras no respondan
-    if (!isSyncRequestAllowed(fk_table, now)) {
-        console.log(`Mesa ${fk_table}: solicitud de juegos faltantes omitida (cooldown de ${SYNC_CONFIG.cooldownMs / 1000}s activo).`);
+    if (!isSyncRequestAllowed(tableNumber, now)) {
+        console.log(`Mesa ${tableNumber}: solicitud de juegos faltantes omitida (cooldown de ${SYNC_CONFIG.cooldownMs / 1000}s activo).`);
         return;
     }
 
-    console.log("\x1b[1;33;47m" + "Solicitud de juegos faltantes enviada a mesa con ID: " + fk_table + "\x1b[0m");
+    console.log("\x1b[1;33;47m" + "Solicitud de juegos faltantes enviada a mesa con número: " + tableNumber + "\x1b[0m");
     log("Último juego registrado en sala para esta mesa:", lastRegisteredGame);
 
     // (a) callback para detectar errores de publicación
-    casino.client.publish(casino.topicSrvGame + fk_table, JSON.stringify({ id: fk_table, last_game_registered: lastRegisteredGame }), { qos: 0 }, (err) => {
+    casino.client.publish(casino.topicSrvGame + tableNumber, JSON.stringify({ id: tableNumber, last_game_registered: lastRegisteredGame }), { qos: 0 }, (err) => {
         if (err) {
-            console.error(`Error al publicar solicitud de juegos faltantes en tópico ${casino.topicSrvGame}${fk_table}:`, err);
+            console.error(`Error al publicar solicitud de juegos faltantes en tópico ${casino.topicSrvGame}${tableNumber}:`, err);
         }
     });
 
-    markSyncRequested(fk_table, now);
+    markSyncRequested(tableNumber, now);
 }
 
 export { GameMessage };
